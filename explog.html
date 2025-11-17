@@ -720,7 +720,14 @@
                      <label for="primary-table-select">Tabela Principal:</label>
                      <select id="primary-table-select"></select>
                  </div>
+                 <div class="primary-table-selector" style="background-color: #d1ecf1; border: 1px solid #17a2b8;">
+                     <label for="event-filter-select">Filtrar por Evento:</label>
+                     <select id="event-filter-select">
+                         <option value="">Todos os Eventos</option>
+                     </select>
+                 </div>
                  <div class="buttons-group">
+                     <button id="back-btn" style="background-color: #6c757d; display: none;">⬅️ Voltar</button>
                      <button id="validate-btn">Validar IDs</button>
                      <button id="show-full-diagram-btn" style="background-color: #17a2b8;">📊 Diagrama Completo</button>
                      <button id="clear-filter-btn" style="display: none;">Limpar Filtro</button>
@@ -959,17 +966,19 @@
         const initialTableOrder = ['teams', 'users', 'assessment_answers', 'mentorings', 'mentorins', 'checkpoints', 'assessment_questions', 'assessment_questions_survey', 'f_submissions', 'guilds'];
         let currentTableOrder = [...initialTableOrder];
         let sortStates = {};
+        let previousState = null;
+        let currentEventFilter = '';
 
         const tableConfig = {
-            users: { title: 'Users', headers: ['selecionar', 'id', 'full_name', 'email', 'role', 'member_id', 'team_id', 'indicadores'] },
-            assessment_answers: { title: 'Assessment Answers', headers: ['selecionar', 'id', 'user_id', 'team_id', 'question_id', 'answer', 'moment', 'submission_id'] },
+            users: { title: 'Users', headers: ['selecionar', 'id', 'full_name', 'email', 'role', 'member_id', 'team_id', 'event_id', 'indicadores'] },
+            assessment_answers: { title: 'Assessment Answers', headers: ['selecionar', 'id', 'user_id', 'team_id', 'event_id', 'question_id', 'answer', 'moment', 'submission_id'] },
             teams: { title: 'Teams', headers: ['selecionar', 'id', 'name', 'code', 'status', 'event_id'] },
-            mentorings: { title: 'Mentorings', headers: ['selecionar', 'id', 'team_id', 'guild_id', 'request_member_id', 'mentor_id', 'request_date'] },
-            mentorins: { title: 'Mentorins (f_submissions)', headers: ['selecionar', 'id', 'evaluator_id', 'target_user_id', 'target_team_id', 'survey_id', 'checkpoint_id', 'created_at'] },
+            mentorings: { title: 'Mentorings', headers: ['selecionar', 'id', 'team_id', 'guild_id', 'event_id', 'request_member_id', 'mentor_id', 'request_date'] },
+            mentorins: { title: 'Mentorins (f_submissions)', headers: ['selecionar', 'id', 'evaluator_id', 'target_user_id', 'target_team_id', 'event_id', 'survey_id', 'checkpoint_id', 'created_at'] },
             checkpoints: { title: 'Checkpoints', headers: ['selecionar', 'id', 'number', 'status', 'guild_id', 'thread_id', 'created_at', 'event_id'] },
             assessment_questions: { title: 'Assessment Questions (Habilidades)', headers: ['selecionar', 'id', 'text', 'category', 'order'] },
             assessment_questions_survey: { title: 'Assessment Questions (Survey)', headers: ['selecionar', 'id', 'text', 'type', 'survey_id'] },
-            f_submissions: { title: 'F Submissions', headers: ['selecionar', 'submission_id', 'user_id', 'question_id', 'answer', 'moment'] },
+            f_submissions: { title: 'F Submissions', headers: ['selecionar', 'submission_id', 'user_id', 'event_id', 'question_id', 'answer', 'moment'] },
             guilds: { title: 'Guilds', headers: ['selecionar', 'event_id', 'name', 'invite', 'created_at'] },
         };
 
@@ -1148,6 +1157,70 @@
                 // Se encontrou, adicionar o team_id ao usuário
                 if (userAnswer) {
                     user.team_id = userAnswer.team_id;
+                }
+            });
+            
+            // ATRIBUIR EVENT_ID A TODOS OS USUÁRIOS E ENTIDADES BASEADO NO TEAM_ID
+            // Criar mapa de team_id -> event_id para facilitar o lookup
+            const teamEventMap = {};
+            result.teams.forEach(team => {
+                if (team.id && team.event_id) {
+                    teamEventMap[team.id] = team.event_id;
+                }
+            });
+            
+            // Criar mapa de guild_id -> event_id para mentorings sem team_id
+            const guildEventMap = {};
+            result.guilds.forEach(guild => {
+                if (guild.id && guild.event_id) {
+                    guildEventMap[guild.id] = guild.event_id;
+                }
+            });
+            
+            // Atribuir event_id aos usuários baseado no team_id
+            result.users.forEach(user => {
+                if (user.team_id && teamEventMap[user.team_id]) {
+                    user.event_id = teamEventMap[user.team_id];
+                }
+            });
+            
+            // Atribuir event_id aos assessment_answers baseado no team_id
+            result.assessment_answers.forEach(answer => {
+                if (answer.team_id && teamEventMap[answer.team_id]) {
+                    answer.event_id = teamEventMap[answer.team_id];
+                }
+            });
+            
+            // Atribuir event_id aos mentorings baseado no team_id OU guild_id
+            result.mentorings.forEach(mentoring => {
+                if (mentoring.team_id && teamEventMap[mentoring.team_id]) {
+                    mentoring.event_id = teamEventMap[mentoring.team_id];
+                } else if (mentoring.guild_id && guildEventMap[mentoring.guild_id]) {
+                    // Fallback: usar guild_id quando team_id não está disponível
+                    mentoring.event_id = guildEventMap[mentoring.guild_id];
+                }
+            });
+            
+            // Atribuir event_id aos mentorins baseado no target_team_id
+            result.mentorins.forEach(mentorin => {
+                if (mentorin.target_team_id && teamEventMap[mentorin.target_team_id]) {
+                    mentorin.event_id = teamEventMap[mentorin.target_team_id];
+                } else if (mentorin.target_user_id) {
+                    // Se não tem target_team_id, tentar obter do target_user
+                    const targetUser = result.users.find(u => u.id === mentorin.target_user_id);
+                    if (targetUser && targetUser.event_id) {
+                        mentorin.event_id = targetUser.event_id;
+                    }
+                }
+            });
+            
+            // Atribuir event_id aos f_submissions baseado no user_id
+            result.f_submissions.forEach(submission => {
+                if (submission.user_id) {
+                    const user = result.users.find(u => u.id === submission.user_id);
+                    if (user && user.event_id) {
+                        submission.event_id = user.event_id;
+                    }
                 }
             });
             
@@ -1947,6 +2020,7 @@
         function renderControls(order) {
             const selectBox = document.getElementById('primary-table-select');
             const checkboxWrapper = document.querySelector('.controls .checkbox-group');
+            const eventFilterSelect = document.getElementById('event-filter-select');
             
             selectBox.innerHTML = '';
             checkboxWrapper.innerHTML = '';
@@ -1964,6 +2038,40 @@
                 selectBox.appendChild(option);
 
                 checkboxWrapper.innerHTML += `<label><input type="checkbox" class="table-toggle" data-table="${key}" checked> ${config.title}</label>`;
+            });
+            
+            // Popular dropdown de eventos/guilds
+            const eventIds = new Set();
+            const eventNames = {};
+            
+            // Coletar event_ids únicos de teams e guilds
+            originalSegregatedData.teams.forEach(team => {
+                if (team.event_id) {
+                    eventIds.add(team.event_id);
+                }
+            });
+            
+            originalSegregatedData.guilds.forEach(guild => {
+                if (guild.event_id) {
+                    eventIds.add(guild.event_id);
+                    if (!eventNames[guild.event_id] && guild.name) {
+                        eventNames[guild.event_id] = guild.name;
+                    }
+                }
+            });
+            
+            // Limpar e popular o dropdown de eventos
+            eventFilterSelect.innerHTML = '<option value="">Todos os Eventos</option>';
+            const sortedEventIds = Array.from(eventIds).sort();
+            
+            sortedEventIds.forEach(eventId => {
+                const option = document.createElement('option');
+                option.value = eventId;
+                option.textContent = eventNames[eventId] ? `Evento ${eventId} - ${eventNames[eventId]}` : `Evento ${eventId}`;
+                if (eventId === currentEventFilter) {
+                    option.selected = true;
+                }
+                eventFilterSelect.appendChild(option);
             });
         }
 
@@ -2097,6 +2205,14 @@
                 currentTableOrder.unshift(selectedTableKey);
                 renderAllTables(segregatedData, currentTableOrder);
             });
+            
+            // Event listener para o filtro de eventos/guilds
+            document.getElementById('event-filter-select').addEventListener('change', (event) => {
+                applyEventFilter(event.target.value);
+            });
+            
+            // Event listener para o botão Voltar
+            document.getElementById('back-btn').addEventListener('click', goBackToPreviousState);
 
 
             const tablesWrapper = document.getElementById('tables-wrapper');
@@ -2588,7 +2704,145 @@
             }
         }
         
+        // =================== FILTRO POR EVENTO/GUILD ===================
+        
+        function applyEventFilter(eventId) {
+            console.log(`Filtrando por evento: ${eventId}`);
+            
+            // SALVAR ESTADO ATUAL ANTES DE APLICAR O FILTRO DE EVENTO
+            if (eventId) {
+                previousState = {
+                    segregatedData: JSON.parse(JSON.stringify(segregatedData)),
+                    currentTableOrder: [...currentTableOrder],
+                    sortStates: JSON.parse(JSON.stringify(sortStates)),
+                    currentEventFilter: currentEventFilter
+                };
+                console.log('Estado anterior salvo antes de aplicar filtro de evento');
+            }
+            
+            currentEventFilter = eventId;
+            
+            if (!eventId) {
+                // Se nenhum evento selecionado, mostrar todos os dados
+                segregatedData = JSON.parse(JSON.stringify(originalSegregatedData));
+                renderAllTables(segregatedData, currentTableOrder);
+                return;
+            }
+            
+            // Filtrar dados por event_id
+            const filteredData = {
+                teams: [], users: [], mentorings: [], mentorins: [], assessment_answers: [],
+                assessment_questions: [], assessment_questions_survey: [], f_submissions: [], 
+                guilds: [], checkpoints: [], f_answers: []
+            };
+            
+            // Filtrar teams por event_id
+            filteredData.teams = originalSegregatedData.teams.filter(team => 
+                String(team.event_id) === String(eventId)
+            );
+            
+            // Filtrar users por event_id
+            filteredData.users = originalSegregatedData.users.filter(user => 
+                String(user.event_id) === String(eventId)
+            );
+            
+            // Filtrar assessment_answers por event_id
+            filteredData.assessment_answers = originalSegregatedData.assessment_answers.filter(answer => 
+                String(answer.event_id) === String(eventId)
+            );
+            
+            // Filtrar mentorings por event_id
+            filteredData.mentorings = originalSegregatedData.mentorings.filter(mentoring => 
+                String(mentoring.event_id) === String(eventId)
+            );
+            
+            // Filtrar mentorins por event_id
+            filteredData.mentorins = originalSegregatedData.mentorins.filter(mentorin => 
+                String(mentorin.event_id) === String(eventId)
+            );
+            
+            // Filtrar checkpoints por event_id
+            filteredData.checkpoints = originalSegregatedData.checkpoints.filter(checkpoint => 
+                String(checkpoint.event_id) === String(eventId)
+            );
+            
+            // Filtrar guilds por event_id
+            filteredData.guilds = originalSegregatedData.guilds.filter(guild => 
+                String(guild.event_id) === String(eventId)
+            );
+            
+            // Filtrar f_submissions por event_id
+            filteredData.f_submissions = originalSegregatedData.f_submissions.filter(submission => 
+                String(submission.event_id) === String(eventId)
+            );
+            
+            // Manter as questions (não têm event_id)
+            filteredData.assessment_questions = originalSegregatedData.assessment_questions;
+            filteredData.assessment_questions_survey = originalSegregatedData.assessment_questions_survey;
+            filteredData.f_answers = originalSegregatedData.f_answers;
+            
+            // Atualizar dados segregados
+            segregatedData = filteredData;
+            
+            // Renderizar tabelas com dados filtrados
+            renderAllTables(segregatedData, currentTableOrder);
+            
+            console.log(`Filtro aplicado. Resultados:`, {
+                teams: filteredData.teams.length,
+                users: filteredData.users.length,
+                assessment_answers: filteredData.assessment_answers.length,
+                mentorings: filteredData.mentorings.length,
+                mentorins: filteredData.mentorins.length
+            });
+            
+            // Mostrar botão Voltar quando filtro de evento é aplicado
+            document.getElementById('back-btn').style.display = 'inline-block';
+        }
+        
+        // =================== BOTÃO VOLTAR - PRESERVAR ESTADO DOS FILTROS ===================
+        
+        function goBackToPreviousState() {
+            if (!previousState) {
+                console.log('Nenhum estado anterior para restaurar');
+                return;
+            }
+            
+            console.log('Restaurando estado anterior...');
+            
+            // Restaurar dados segregados
+            segregatedData = JSON.parse(JSON.stringify(previousState.segregatedData));
+            currentTableOrder = [...previousState.currentTableOrder];
+            sortStates = JSON.parse(JSON.stringify(previousState.sortStates));
+            currentEventFilter = previousState.currentEventFilter;
+            
+            // Restaurar dropdown de evento
+            const eventFilterSelect = document.getElementById('event-filter-select');
+            eventFilterSelect.value = currentEventFilter;
+            
+            // Renderizar tabelas
+            renderAllTables(segregatedData, currentTableOrder);
+            
+            // Esconder botão voltar
+            document.getElementById('back-btn').style.display = 'none';
+            document.getElementById('clear-filter-btn').style.display = 'none';
+            
+            // Limpar estado anterior
+            previousState = null;
+            
+            console.log('Estado anterior restaurado');
+        }
+        
         function applyAdvancedFilter(itemId, sourceTableKey) {
+            // SALVAR ESTADO ATUAL ANTES DE APLICAR O FILTRO
+            previousState = {
+                segregatedData: JSON.parse(JSON.stringify(segregatedData)),
+                currentTableOrder: [...currentTableOrder],
+                sortStates: JSON.parse(JSON.stringify(sortStates)),
+                currentEventFilter: currentEventFilter
+            };
+            
+            console.log('Estado anterior salvo antes de aplicar filtro advanced');
+            
             const sourceItem = originalSegregatedData[sourceTableKey].find(item => (item.id || item.submission_id || item.invite) === itemId);
             if (!sourceItem) {
                 console.error("Item de origem não encontrado:", itemId, sourceTableKey);
@@ -2780,6 +3034,7 @@
             
             document.getElementById('validate-btn').style.display = 'none';
             document.getElementById('clear-filter-btn').style.display = 'inline-block';
+            document.getElementById('back-btn').style.display = 'inline-block';
         }
 
 
@@ -2787,6 +3042,9 @@
             segregatedData = JSON.parse(JSON.stringify(originalSegregatedData));
             currentTableOrder = [...initialTableOrder];
             sortStates = {};
+            
+            // Limpar estado anterior ao limpar filtro
+            previousState = null;
             
             // Mantém os resumos das médias da equipe sempre visíveis
             // document.getElementById('team-averages-summary').style.display = 'none';
@@ -2801,6 +3059,7 @@
 
             document.getElementById('validate-btn').style.display = 'inline-block';
             document.getElementById('clear-filter-btn').style.display = 'none';
+            document.getElementById('back-btn').style.display = 'none';
         }
 
         // =================== SISTEMA DE BUSCA POR FILTROS (DATA FILTERING) ===================
